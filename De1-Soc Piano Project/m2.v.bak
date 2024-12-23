@@ -1,0 +1,184 @@
+module m2 (
+    input CLOCK_50,         // 50 MHz clock from DE1-SoC
+    input [3:0] KEY,        // Keys for reset control
+    output AUD_XCK,         // Clock for the audio chip
+    output AUD_DACDAT,      // Digital audio data output
+    inout AUD_BCLK,         // Audio bit-stream clock
+    inout AUD_ADCLRCK,      // Audio ADC LR clock
+    inout AUD_DACLRCK,      // Audio DAC LR clock
+    output FPGA_I2C_SCLK,   // I2C clock for audio configuration
+    inout FPGA_I2C_SDAT,    // I2C data for audio configuration // Keyboard input (use switches for testing, can be replaced with actual keyboard data)
+	 inout  PS2_CLK,
+	 inout PS2_DAT
+);
+	
+	
+	 wire [7:0] letterCode;
+    wire keyPressed;
+    reg [7:0] storedLetterCode;
+    reg [1:0] state;
+    
+    
+    parameter idle = 2'b0;
+    parameter break   = 2'b1;
+	 
+	 PS2_Controller PS2(
+        .CLOCK_50(CLOCK_50),
+        .reset(~KEY[0]),
+        .PS2_CLK(PS2_CLK),
+        .PS2_DAT(PS2_DAT),
+        .received_data(letterCode),
+        .received_data_en(keyPressed)
+    );
+	 
+	 always @(posedge CLOCK_50)
+    begin
+        if (!KEY[0]) // Reset condition
+        begin
+            state <= idle;
+            storedLetterCode <= 8'b0;
+        end
+	 
+	else if (keyPressed)
+	begin
+	case (state)
+	idle:
+	if (letterCode == 8'hF0)
+		state <= break;  // Detected key release initiation
+	else
+	begin
+		// Key pressed: store make code and update lights
+		storedLetterCode <= letterCode;
+		state <= idle;
+	end
+	break:
+	begin
+// Key release: check if it matches storedLetterCode
+	if (letterCode == storedLetterCode)
+	begin
+	storedLetterCode <= 8'b0;
+	end
+	state <= idle;
+	end
+	endcase
+	end
+	end
+	 
+	 
+	 
+	 
+	 
+	 
+	 
+    wire [31:0] tone; // Create 32-bit tone variable
+
+    // Call module for tone assignment
+    KeyboardTone u1 (
+        .storedLetterCode(storedLetterCode),         // Map SW to the input port named SW
+        .tone(tone)      // Map tone to the output port named tone
+    );
+	
+
+    // Clock Frequency for DE1-SoC
+    parameter CLOCK_FREQ = 50000000; // 50 MHz
+	
+    // Registers
+    reg [31:0] delay_cnt = 0;
+    reg square_wave = 0;
+
+    // Calculate half-period in clock cycles for the specified frequency
+    integer half_period;
+    always @(*) begin
+        if (tone != 0)
+            half_period = CLOCK_FREQ / (2 * tone); // Dynamic half-period based on `tone`
+        else
+            half_period = CLOCK_FREQ; // Default or silent tone
+    end
+
+    // Toggle square wave to create tone
+    always @(posedge CLOCK_50) begin
+        if (delay_cnt >= half_period) begin
+            delay_cnt <= 0;
+            square_wave <= ~square_wave;
+        end else begin
+            delay_cnt <= delay_cnt + 1;
+        end
+    end
+
+    // Assign square wave output to audio DAC
+    wire [31:0] audio_out = square_wave ? 32'0xFFFFFFF : -32'0xFFFFFFF;
+
+    // Audio output controller
+    Audio_Controller Audio_Controller ( // Audio controller takes audio_out and manages it
+        .CLOCK_50(CLOCK_50),
+        .reset(~KEY[0]),
+        .clear_audio_in_memory(),
+        .clear_audio_out_memory(),
+        .left_channel_audio_out(audio_out),
+        .right_channel_audio_out(audio_out),
+        .write_audio_out(1'b1),     // Always write audio out
+        .AUD_ADCDAT(1'b0),
+        .AUD_BCLK(AUD_BCLK),
+        .AUD_ADCLRCK(AUD_ADCLRCK),
+        .AUD_DACLRCK(AUD_DACLRCK),
+        .audio_in_available(),
+        .audio_out_allowed(),
+        .AUD_XCK(AUD_XCK),
+        .AUD_DACDAT(AUD_DACDAT)
+    );
+
+    // Audio configuration module
+    avconf #(.USE_MIC_INPUT(1)) avc (
+        .FPGA_I2C_SCLK(FPGA_I2C_SCLK),
+        .FPGA_I2C_SDAT(FPGA_I2C_SDAT),
+        .CLOCK_50(CLOCK_50),
+        .reset(~KEY[0])
+    );
+
+endmodule
+
+
+    module KeyboardTone (
+    input [7:0] storedLetterCode,             // 12-bit switch input from DE1-SoC
+    output reg [31:0] tone       // 32-bit output tone frequency
+);
+
+// Define note frequencies in Hz (approximate)
+parameter C4 = 261;  // Middle C
+parameter D4 = 293;
+parameter E4 = 329;
+parameter F4 = 349;
+parameter G4 = 392;
+parameter A4 = 440;
+parameter B4 = 493;
+
+// Define note frequencies for the next octave (one octave higher)
+parameter C5 = C4 * 2;
+parameter D5 = D4 * 2;
+parameter E5 = E4 * 2;
+parameter F5 = F4 * 2;
+parameter G5 = G4 * 2;
+parameter A5 = A4 * 2;
+parameter B5 = B4 * 2;
+
+// Map each switch to a different tone
+always @(*) begin
+    case (storedLetterCode)
+        8'h15: tone = C4;   // SW[0] -> C4
+        8'h1D: tone = D4;   // SW[1] -> D4
+        8'h24: tone = E4;   // SW[2] -> E4
+        8'h2D: tone = F4;   // SW[3] -> F4
+        8'h2C: tone = G4;   // SW[4] -> G4
+        8'h35: tone = A4;   // SW[5] -> A4
+        8'h3C: tone = B4;   // SW[6] -> B4
+        // 12'b000010000000: tone = C5;   // SW[7] -> C5 (higher octave)
+        // 12'b000100000000: tone = D5;   // SW[8] -> D5
+        // 12'b001000000000: tone = E5;   // SW[9] -> E5
+        // 12'b010000000000: tone = F5;   // SW[10] -> F5
+        // 12'b100000000000: tone = G5;   // SW[11] -> G5
+        default: tone = 0;             // Default if no switches are pressed
+    endcase
+end
+
+endmodule
+
