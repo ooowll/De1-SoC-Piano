@@ -20,9 +20,10 @@ This project implements a digital piano synthesizer on the **DE1-SoC FPGA** plat
 - 🎨 Enhanced VGA graphics with more dynamic animations  
 
 ## 👥 Authors  
-- **Harish Babu** – PS/2 Controller, VGA Controller, On-board memory integration  
-- **Dylan Ho** – Audio Controller, Multi-note implementation, Keyboard logic  
+- **Harish Babu**
+- **Dylan Ho**
 
+Created as a final project for a Digital Systems course at the University of Toronto
 ![image](https://github.com/user-attachments/assets/65d9576d-8f2c-4705-9f84-f18a29654128)
 ![image](https://github.com/user-attachments/assets/04259181-8837-469c-9666-1bd97537b85a)
 
